@@ -16,6 +16,7 @@ const timeFormat = new Intl.DateTimeFormat(navigator.language, {
   timeZoneName: 'short',
 });
 const clockFormat = new Intl.DateTimeFormat(navigator.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const ackFormat = new Intl.DateTimeFormat(navigator.language, { hour: '2-digit', minute: '2-digit' });
 
 /** Acks survive a reload of the board: incident id -> ackedAt. */
 const ackedKey = `acked:${SESSION}`;
@@ -50,7 +51,9 @@ function formatTime(iso) {
 }
 
 function ackedMark(ackedAt) {
-  return el('span', { 'data-testid': 'acked', class: 'acked' }, `acked ${formatTime(ackedAt)}`);
+  const mark = el('span', { 'data-testid': 'acked', class: 'acked' }, `✓ acked ${ackFormat.format(new Date(ackedAt))}`);
+  mark.title = formatTime(ackedAt);
+  return mark;
 }
 
 function ackButton(id) {
