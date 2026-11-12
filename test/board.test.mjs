@@ -97,11 +97,15 @@ test('new incidents appear at the top without a reload, refreshing every 2 s (R1
   await context.close();
 });
 
-test('Ack acks that incident with the latest cursor and keeps the mark across refreshes (R2)', async () => {
+test('Ack acks that incident with the latest cursor after the confirm, and keeps the mark across refreshes (R2, R7)', async () => {
   const state = { incidents: [incident('INC-2', '2026-11-12T03:10:00.000Z'), incident('INC-1', '2026-11-12T03:03:00.000Z')] };
   const { page, context } = await openBoard(state);
   await page.locator('[data-id="INC-1"] [data-testid="ack"]').click();
+  assert.match(await page.locator('[data-testid="confirm"]').innerText(), /INC-1\b/);
+  assert.equal(state.acks.length, 0, 'nothing is sent before the confirm');
+  await page.locator('[data-testid="confirm-ack"]').click();
   await page.locator('[data-id="INC-1"] [data-testid="acked"]').waitFor();
+  assert.equal(await page.locator('[data-testid="confirm"]').isVisible(), false);
   assert.equal(state.acks.length, 1);
   assert.equal(state.acks[0].id, 'INC-1');
   assert.equal(state.acks[0].cursor, `c${state.polls}`);
@@ -109,6 +113,39 @@ test('Ack acks that incident with the latest cursor and keeps the mark across re
   await page.locator('[data-id="INC-3"]').waitFor({ timeout: 4000 });
   assert.equal(await page.locator('[data-id="INC-1"] [data-testid="acked"]').count(), 1);
   assert.equal(await page.locator('[data-id="INC-2"] [data-testid="ack"]').count(), 1);
+  await context.close();
+});
+
+test('Cancel and Escape close the confirm without an ack (R7)', async () => {
+  const state = { incidents: [incident('INC-1', '2026-11-12T03:03:00.000Z')] };
+  const { page, context } = await openBoard(state);
+  const ackButton = page.locator('[data-id="INC-1"] [data-testid="ack"]');
+  await ackButton.click();
+  await page.locator('[data-testid="confirm-cancel"]').click();
+  assert.equal(await page.locator('[data-testid="confirm"]').isVisible(), false);
+  await ackButton.click();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('[data-testid="confirm"]').isVisible(), false);
+  assert.equal(state.acks.length, 0);
+  await context.close();
+});
+
+test('a click that lands on a row pushed down by a new incident names that row, so on-call can cancel (R7)', async () => {
+  const state = { incidents: [incident('INC-2', '2026-11-12T03:10:00.000Z'), incident('INC-1', '2026-11-12T03:03:00.000Z')] };
+  const { page, context } = await openBoard(state);
+  const box = await page.locator('[data-id="INC-1"] [data-testid="ack"]').boundingBox();
+  await page.evaluate(() => (window.__removed = 0, new MutationObserver((rs) => rs.forEach((r) => (window.__removed += r.removedNodes.length))).observe(document.querySelector('[data-testid="incident-list"]'), { childList: true })));
+  state.incidents = [incident('INC-3', '2026-11-12T03:20:00.000Z'), ...state.incidents];
+  await page.locator('[data-id="INC-3"]').waitFor({ timeout: 4000 });
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  assert.match(await page.locator('[data-testid="confirm"]').innerText(), /INC-2\b/);
+  await page.locator('[data-testid="confirm-cancel"]').click();
+  await page.locator('[data-id="INC-1"] [data-testid="ack"]').click();
+  assert.match(await page.locator('[data-testid="confirm"]').innerText(), /INC-1\b/);
+  await page.locator('[data-testid="confirm-ack"]').click();
+  await page.locator('[data-id="INC-1"] [data-testid="acked"]').waitFor();
+  assert.deepEqual(state.acks.map((a) => a.id), ['INC-1']);
+  assert.equal(await page.evaluate(() => window.__removed), 0, 'refreshes never take rows off the list');
   await context.close();
 });
 

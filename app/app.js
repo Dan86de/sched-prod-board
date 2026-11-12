@@ -7,6 +7,11 @@ const loader = document.querySelector('[data-testid="loader"]');
 const empty = document.querySelector('[data-testid="empty"]');
 const list = document.querySelector('[data-testid="incident-list"]');
 const status = document.querySelector('[data-role="status"]');
+const confirmBox = document.querySelector('[data-testid="confirm"]');
+const confirmTitle = confirmBox.querySelector('.confirm-title');
+const confirmWhat = confirmBox.querySelector('.confirm-what');
+const confirmAck = confirmBox.querySelector('[data-testid="confirm-ack"]');
+const confirmCancel = confirmBox.querySelector('[data-testid="confirm-cancel"]');
 
 const timeFormat = new Intl.DateTimeFormat(navigator.language, {
   day: '2-digit',
@@ -56,22 +61,60 @@ function ackedMark(ackedAt) {
   return mark;
 }
 
-function ackButton(id) {
+async function sendAck(id, button) {
+  button.disabled = true;
+  button.textContent = 'Acking…';
+  try {
+    const reply = await ack(id);
+    acked.set(id, reply.ackedAt);
+    saveAcked();
+    button.replaceWith(ackedMark(reply.ackedAt));
+  } catch (error) {
+    console.error(error);
+    button.disabled = false;
+    button.textContent = 'Retry ack';
+  }
+}
+
+/**
+ * Ack asks to confirm, and the confirm names the incident (product's decision after step 1): rows move
+ * when new incidents arrive at the top, so on-call checks the id before the ack is sent.
+ * The confirm is fixed on screen, so it does not move with the list.
+ */
+let pending = null;
+
+function openConfirm(incident, button) {
+  closeConfirm();
+  pending = { id: incident.id, button };
+  button.closest('[data-testid="incident-row"]').classList.add('confirming');
+  confirmTitle.textContent = `Ack ${incident.id}?`;
+  confirmWhat.textContent = `${incident.severity} · ${incident.service} · ${incident.region} · ${incident.summary}`;
+  confirmAck.textContent = `Ack ${incident.id}`;
+  confirmBox.hidden = false;
+  confirmAck.focus();
+}
+
+function closeConfirm({ restoreFocus = false } = {}) {
+  if (!pending) return;
+  pending.button.closest('[data-testid="incident-row"]')?.classList.remove('confirming');
+  if (restoreFocus && pending.button.isConnected) pending.button.focus();
+  pending = null;
+  confirmBox.hidden = true;
+}
+
+confirmAck.addEventListener('click', () => {
+  const { id, button } = pending;
+  closeConfirm();
+  sendAck(id, button);
+});
+confirmCancel.addEventListener('click', () => closeConfirm({ restoreFocus: true }));
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeConfirm({ restoreFocus: true });
+});
+
+function ackButton(incident) {
   const button = el('button', { type: 'button', 'data-testid': 'ack', class: 'ack' }, 'Ack');
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    button.textContent = 'Acking…';
-    try {
-      const reply = await ack(id);
-      acked.set(id, reply.ackedAt);
-      saveAcked();
-      button.replaceWith(ackedMark(reply.ackedAt));
-    } catch (error) {
-      console.error(error);
-      button.disabled = false;
-      button.textContent = 'Retry ack';
-    }
-  });
+  button.addEventListener('click', () => openConfirm(incident, button));
   return button;
 }
 
@@ -84,7 +127,7 @@ function createRow(incident) {
     el('span', { class: 'sev' }, incident.severity),
     el('span', { class: 'what' }, `${incident.service} · ${incident.region} · ${incident.summary}`),
     time,
-    acked.has(incident.id) ? ackedMark(acked.get(incident.id)) : ackButton(incident.id),
+    acked.has(incident.id) ? ackedMark(acked.get(incident.id)) : ackButton(incident),
   );
   return row;
 }
